@@ -31,21 +31,28 @@ from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler, smooth_rank_measure
 from fvcore.common.checkpoint import PeriodicCheckpointer
 
-torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
+torch.backends.cuda.matmul.allow_tf32 = (
+    True  # PyTorch 1.12 sets this to False by default
+)
 logger = logging.getLogger("dinov2")
 
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
     parser.add_argument(
-        "--config-file", default="./dinov2/configs/train/custom.yaml", metavar="FILE", help="path to config file"
+        "--config-file",
+        default="./dinov2/configs/train/custom.yaml",
+        metavar="FILE",
+        help="path to config file",
     )
     parser.add_argument(
         "--no-resume",
         action="store_true",
         help="Whether to not attempt to resume from the checkpoint directory. ",
     )
-    parser.add_argument("--eval-only", action="store_true", help="perform evaluation only")
+    parser.add_argument(
+        "--eval-only", action="store_true", help="perform evaluation only"
+    )
     parser.add_argument("--eval", type=str, default="", help="Eval type to perform")
     parser.add_argument(
         "opts",
@@ -60,18 +67,24 @@ For python-based LazyConfig, use "path.key=value".
     parser.add_argument(
         "--output-dir",
         "--output_dir",
-        default="",
+        default="vitl_train",
         type=str,
         help="Output directory to save logs and checkpoints",
     )
-    parser.add_argument("--name", type=str, default="debug", help="Name of the run for logging")
-    parser.add_argument("--local-rank", type=int, help="Variable for distributed computing.")
+    parser.add_argument(
+        "--name", type=str, default="vitl_train", help="Name of the run for logging"
+    )
+    parser.add_argument(
+        "--local-rank", type=int, help="Variable for distributed computing."
+    )
 
     return parser
 
 
 def build_optimizer(cfg, params_groups):
-    return torch.optim.AdamW(params_groups, betas=(cfg.optim.adamw_beta1, cfg.optim.adamw_beta2))
+    return torch.optim.AdamW(
+        params_groups, betas=(cfg.optim.adamw_beta1, cfg.optim.adamw_beta2)
+    )
 
 
 def build_schedulers(cfg):
@@ -133,6 +146,7 @@ def apply_optim_scheduler(optimizer, lr, wd, last_layer_lr):
 
 def do_test(cfg, model, iteration):
     new_state_dict = model.teacher.state_dict()
+    student_state_dict = model.student.state_dict()
 
     if distributed.is_main_process():
         iterstring = str(iteration)
@@ -141,6 +155,9 @@ def do_test(cfg, model, iteration):
         # save teacher checkpoint
         teacher_ckp_path = os.path.join(eval_dir, "teacher_checkpoint.pth")
         torch.save({"teacher": new_state_dict}, teacher_ckp_path)
+        # save student checkpoint
+        student_ckp_path = os.path.join(eval_dir, "student_checkpoint.pth")
+        torch.save({"student": student_state_dict}, student_ckp_path)
 
 
 def do_train(cfg, model, resume=False):
@@ -160,9 +177,16 @@ def do_train(cfg, model, resume=False):
     ) = build_schedulers(cfg)
 
     # checkpointer
-    checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
+    checkpointer = FSDPCheckpointer(
+        model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True
+    )
 
-    start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    start_iter = (
+        checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get(
+            "iteration", -1
+        )
+        + 1
+    )
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
@@ -250,7 +274,9 @@ def do_train(cfg, model, resume=False):
         max_iter,
         start_iter,
     ):
-        current_batch_size = (data["collated_global_crops"].shape[0] / 2) * torch.cuda.device_count()
+        current_batch_size = (
+            data["collated_global_crops"].shape[0] / 2
+        ) * torch.cuda.device_count()
         if iteration > max_iter:
             return
 
@@ -266,7 +292,9 @@ def do_train(cfg, model, resume=False):
         # compute losses
 
         optimizer.zero_grad(set_to_none=True)
-        loss_dict, class_tokens = model.forward_backward(data, teacher_temp=teacher_temp)
+        loss_dict, class_tokens = model.forward_backward(
+            data, teacher_temp=teacher_temp
+        )
 
         if fp16_scaler is not None:
             if cfg.optim.clip_grad:
@@ -290,7 +318,9 @@ def do_train(cfg, model, resume=False):
         if distributed.get_global_size() > 1:
             for v in loss_dict.values():
                 torch.distributed.all_reduce(v)
-        loss_dict_reduced = {k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()}
+        loss_dict_reduced = {
+            k: v.item() / distributed.get_global_size() for k, v in loss_dict.items()
+        }
 
         if math.isnan(sum(loss_dict_reduced.values())):
             logger.info("NaN detected")
@@ -322,7 +352,9 @@ def do_train(cfg, model, resume=False):
         tokens_needed = desired_tokens - total_tokens_collected
         batch_size = class_tokens.shape[0]  # Current batch size from class_tokens shape
 
-        if tokens_needed > 0 and iteration % 1000 < (int(desired_tokens / batch_size) + 1):
+        if tokens_needed > 0 and iteration % 1000 < (
+            int(desired_tokens / batch_size) + 1
+        ):
             # If the whole batch can be added without exceeding 1000 tokens
             if batch_size <= tokens_needed:
                 batch_collection.append(class_tokens.detach())
@@ -332,18 +364,25 @@ def do_train(cfg, model, resume=False):
                 batch_collection.append(class_tokens.detach()[:tokens_needed, :])
                 total_tokens_collected += tokens_needed
 
-            print(f"{tokens_needed} tokens needed, {total_tokens_collected }tokens collected")
+            print(
+                f"{tokens_needed} tokens needed, {total_tokens_collected }tokens collected"
+            )
 
         # Once desired_tokens are collected, process them
         if total_tokens_collected == desired_tokens:
             embedding_matrix = torch.cat(batch_collection, dim=0)
-            smooth_rank = smooth_rank_measure(embedding_matrix)  # Assuming this function is defined elsewhere
+            smooth_rank = smooth_rank_measure(
+                embedding_matrix
+            )  # Assuming this function is defined elsewhere
             wandb.log({"smooth_rank": smooth_rank})
             # Reset for the next tokens
             batch_collection = []
             total_tokens_collected = 0
 
-        if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+        if (
+            cfg.evaluation.eval_period_iterations > 0
+            and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0
+        ):
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
         periodic_checkpointer.step(iteration)
@@ -376,5 +415,5 @@ if __name__ == "__main__":
     args = get_args_parser(add_help=True).parse_args()
     name = args.name if args.name != "debug" else args.name
     args.output_dir = os.path.join(args.output_dir, name)
-    wandb.init(entity="histo-collab", project="dinov2", name=name, mode="online", config=args)
+    wandb.init(project="dinov2", name=name, mode="online", config=args)
     main(args)
