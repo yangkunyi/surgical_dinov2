@@ -28,3 +28,6 @@ dinov2/data/acevedo samples/*
 figures/**
 *.jpg
 *.jpeg
+*.sh
+*.std*
+*.ipynb

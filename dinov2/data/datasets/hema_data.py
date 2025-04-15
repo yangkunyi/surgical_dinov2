@@ -27,7 +27,7 @@ class HemaStandardDataset(VisionDataset):
         super().__init__(root, transforms, transform, target_transform)
         self.patches = []
 
-        all_dataset_files = Path(root).glob("*.txt")
+        all_dataset_files = Path(root).glob("cholec.txt")
 
         for dataset_file in all_dataset_files:
             print("Loading ", dataset_file)
@@ -38,7 +38,6 @@ class HemaStandardDataset(VisionDataset):
         self.true_len = len(self.patches)
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
-
         try:
             image, filepath = self.get_image_data(index)
         except Exception as e:
@@ -58,8 +57,13 @@ class HemaStandardDataset(VisionDataset):
         # Load image from jpeg file
         adjusted_index = index % self.true_len
         filepath = self.patches[adjusted_index]
-        patch = Image.open(filepath).convert(mode="RGB").resize((dimension, dimension), Image.Resampling.LANCZOS)
+        patch = (
+            Image.open(filepath)
+            .convert(mode="RGB")
+            .resize((dimension, dimension), Image.Resampling.LANCZOS)
+        )
         return patch, filepath
+    
 
     def get_target(self, index: int) -> torch.Tensor:
         # labels are not used for training

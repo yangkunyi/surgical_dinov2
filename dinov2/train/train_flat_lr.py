@@ -91,10 +91,10 @@ def build_schedulers(cfg):
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     lr = dict(
         base_value=cfg.optim["lr"],
-        final_value=cfg.optim["min_lr"],
+        final_value=cfg.optim["lr"],
         total_iters=cfg.optim["epochs"] * OFFICIAL_EPOCH_LENGTH,
-        warmup_iters=int(cfg.optim["warmup_epochs"] * OFFICIAL_EPOCH_LENGTH),
-        start_warmup_value=0,
+        # warmup_iters=int(cfg.optim["warmup_epochs"] * OFFICIAL_EPOCH_LENGTH),
+        # start_warmup_value=0,
     )
     wd = dict(
         base_value=cfg.optim["weight_decay"],
@@ -365,7 +365,7 @@ def do_train(cfg, model, resume=False):
                 total_tokens_collected += tokens_needed
 
             print(
-                f"{tokens_needed} tokens needed, {total_tokens_collected }tokens collected"
+                f"{tokens_needed} tokens needed, {total_tokens_collected}tokens collected"
             )
 
         # Once desired_tokens are collected, process them
