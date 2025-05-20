@@ -96,3 +96,7 @@ dino:
 #  local_crops_size: 96
 #dino:
 #  head_bottleneck_dim: 256
+depth:
+  loss_weight: 10
+  temperature: 0.05
+

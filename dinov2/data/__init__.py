@@ -5,6 +5,6 @@
 
 from .adapters import DatasetWithEnumeratedTargets
 from .augmentations import DataAugmentationDINO, DataAugmentationHEMA
-from .collate import collate_data_and_cast
+from .collate import collate_data_and_cast, collate_data_and_cast_with_depth
 from .loaders import SamplerType, make_data_loader, make_dataset
 from .masking import MaskingGenerator

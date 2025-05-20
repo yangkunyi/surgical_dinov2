@@ -20,7 +20,8 @@ from dinov2.data import (
     DataAugmentationHEMA,
     MaskingGenerator,
     SamplerType,
-    collate_data_and_cast,
+    # collate_data_and_cast,
+    collate_data_and_cast_with_depth,
     make_data_loader,
     make_dataset,
 )
@@ -225,7 +226,7 @@ def do_train(cfg, model, resume=False):
         )
 
     collate_fn = partial(
-        collate_data_and_cast,
+        collate_data_and_cast_with_depth,
         mask_ratio_tuple=cfg.ibot.mask_ratio_min_max,
         mask_probability=cfg.ibot.mask_sample_probability,
         n_tokens=n_tokens,
@@ -365,7 +366,7 @@ def do_train(cfg, model, resume=False):
                 total_tokens_collected += tokens_needed
 
             print(
-                f"{tokens_needed} tokens needed, {total_tokens_collected }tokens collected"
+                f"{tokens_needed} tokens needed, {total_tokens_collected}tokens collected"
             )
 
         # Once desired_tokens are collected, process them

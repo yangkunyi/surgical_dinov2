@@ -6,10 +6,11 @@
 import logging
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Tuple
-
+import os
 import torch
 from PIL import Image
 from torchvision.datasets import VisionDataset
+import torchvision.transforms as T
 
 logger = logging.getLogger("dinov2")
 
@@ -40,10 +41,19 @@ class HemaStandardDataset(VisionDataset):
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
         try:
             image, filepath = self.get_image_data(index)
+            raw_image = image
         except Exception as e:
             adjusted_index = index % self.true_len
             filepath = self.patches[adjusted_index]
-            print(f"can not read image for sample {index, e,filepath}")
+            print(f"can not read image for sample {index, e, filepath}")
+            return self.__getitem__(index + 1)
+
+        try:
+            depth, depthpath = self.get_depth_data(index)
+        except Exception as e:
+            adjusted_index = index % self.true_len
+            filepath = self.patches[adjusted_index]
+            print(f"can not read depth for sample {index, e, filepath}")
             return self.__getitem__(index + 1)
 
         target = self.get_target(index)
@@ -51,7 +61,7 @@ class HemaStandardDataset(VisionDataset):
         if self.transforms is not None:
             image, target = self.transforms(image, target)
 
-        return image, target, filepath
+        return image, target, filepath, T.ToTensor()(raw_image), T.ToTensor()(depth)
 
     def get_image_data(self, index: int, dimension=224) -> Image:
         # Load image from jpeg file
@@ -63,7 +73,24 @@ class HemaStandardDataset(VisionDataset):
             .resize((dimension, dimension), Image.Resampling.LANCZOS)
         )
         return patch, filepath
-    
+
+    def get_depth_data(
+        self,
+        index: int,
+        dimension=224,
+        depth_base_path="/bd_byta6000i0/users/surgicaldinov2/kyyang/Depth-Anything-V2/out",
+    ) -> Image:
+        adjusted_index = index % self.true_len
+        filepath = self.patches[adjusted_index]
+        splited_path = filepath.split("/")
+        depth_file_name = splited_path[-2] + "_" + splited_path[-1]
+        depthpath = os.path.join(depth_base_path, depth_file_name)
+        depth = (
+            Image.open(depthpath)
+            .convert(mode="L")
+            .resize((dimension, dimension), Image.Resampling.LANCZOS)
+        )
+        return depth, depthpath
 
     def get_target(self, index: int) -> torch.Tensor:
         # labels are not used for training

@@ -22,6 +22,8 @@ from dinov2.models.vision_transformer import BlockChunk
 from dinov2.utils.param_groups import fuse_params_groups, get_params_groups_with_decay
 from dinov2.utils.utils import has_batchnorms
 from torch import nn
+import torch.nn.functional as F
+import sys
 
 try:
     from xformers.ops import fmha
@@ -30,6 +32,102 @@ except ImportError:
 
 
 logger = logging.getLogger("dinov2")
+
+
+def depth_loss(raw_image_patch_tokens, depths, depth_temperature):
+    """
+    Computes the depth supervision loss based on pairwise similarities *within* each sample.
+
+    Args:
+        raw_image_patch_tokens (torch.Tensor): Shape [B, N, D].
+                                              Patch tokens (features) from the student model.
+                                              N = number of patches, e.g., (H/14)*(W/14).
+                                              D = feature dimension.
+        depths (torch.Tensor): Shape [B, 1, H, W]. Original high-resolution depth maps.
+        depth_temperature (float): Sigma (σ) value for the Gaussian kernel controlling
+                                   depth similarity bandwidth.
+
+    Returns:
+        torch.Tensor: Scalar depth supervision loss (L_depth), averaged over the batch.
+    """
+    B, _, H, W = depths.shape
+    _B_tokens, N, D = raw_image_patch_tokens.shape  # N = (H/patch_size)*(W/patch_size)
+
+    # --- Infer Patch Size (same as before) ---
+    patch_size_h = H / (N**0.5)
+    patch_size_w = W / (N**0.5)
+    if H % 14 == 0 and W % 14 == 0 and N == (H // 14) * (W // 14):
+        patch_size = 14
+    elif H % 16 == 0 and W % 16 == 0 and N == (H // 16) * (W // 16):
+        patch_size = 16
+    else:
+        patch_size = int((H * W / N) ** 0.5)
+        print(
+            f"Warning: Could not perfectly infer patch size. Using approx: {patch_size}"
+        )
+        if H % patch_size != 0 or W % patch_size != 0:
+            raise ValueError(
+                f"Inferred patch size {patch_size} does not divide H={H} or W={W}"
+            )
+
+    # --- 1. Downsample Depths (same as before) ---
+    downsampled_depths = F.avg_pool2d(depths, kernel_size=patch_size, stride=patch_size)
+    # Shape: [B, 1, N_h, N_w]
+
+    # Flatten the spatial dimensions for each sample independently
+    # Shape becomes [B, N]
+    downsampled_depths_flat_per_batch = downsampled_depths.view(B, -1)
+
+    # --- 2. Calculate Pairwise Depth Similarity (T_ij) - BATCH-WISE ---
+    # We want a result of shape [B, N, N] where T_ij_batch[b, i, j] = similarity between patch i and j of sample b.
+    # Use broadcasting within the batch dimension:
+    # depths [B, N] -> unsqueeze(2) -> [B, N, 1]
+    # depths [B, N] -> unsqueeze(1) -> [B, 1, N]
+    # Broadcasting subtraction [B, N, 1] - [B, 1, N] gives pairwise diffs [B, N, N]
+    delta_ij_batch = torch.abs(
+        downsampled_depths_flat_per_batch.unsqueeze(2)
+        - downsampled_depths_flat_per_batch.unsqueeze(1)
+    )  # Shape [B, N, N]
+
+    # Apply Gaussian kernel element-wise
+    # Add a small epsilon for numerical stability if depth_temperature is zero
+    T_ij_batch = torch.exp(
+        -delta_ij_batch / (depth_temperature + 1e-6)
+    )  # Shape [B, N, N]
+
+    # --- 3. Calculate Feature Similarity (S_ij_scaled) - BATCH-WISE ---
+    # We want a result of shape [B, N, N] where S_ij_batch[b, i, j] = similarity between token i and j of sample b.
+    # Tokens are already [B, N, D]
+
+    # L2-normalize the features along the feature dimension (D)
+    norm_tokens = F.normalize(raw_image_patch_tokens, p=2, dim=2)  # Shape [B, N, D]
+
+    # Compute pairwise cosine similarities using Batch Matrix Multiplication (bmm)
+    # We need [B, N, D] @ [B, D, N] -> [B, N, N]
+    S_ij_batch = torch.bmm(norm_tokens, norm_tokens.transpose(1, 2))  # Shape [B, N, N]
+
+    # Scale similarities to [0, 1]
+    S_ij_scaled_batch = (S_ij_batch + 1.0) / 2.0  # Shape [B, N, N]
+
+    # --- 4. Compute Depth Supervision Loss (L_depth) ---
+    # Use Mean Squared Error (MSE). F.mse_loss computes the mean over all elements by default.
+    # This will average the loss over all B*N*N pairs correctly.
+    # We compare the similarity matrices for each sample element-wise.
+    loss = F.mse_loss(S_ij_scaled_batch, T_ij_batch)
+
+    return loss
+
+
+# Example Usage (assuming you have the inputs):
+# B, H, W, D = 4, 224, 224, 1024
+# patch_size = 14
+# N = (H // patch_size) * (W // patch_size) # N = 16 * 16 = 256
+# dummy_tokens = torch.randn(B, N, D)
+# dummy_depths = torch.rand(B, 1, H, W) * 10 # Example depth values
+# temperature = 0.1 # Example sigma value
+
+# loss_value = depth_loss(dummy_tokens, dummy_depths, temperature)
+# print(f"Calculated Depth Loss: {loss_value.item()}")
 
 
 def smooth_rank_loss(embedding_matrix, eps=1e-7):
@@ -140,9 +238,17 @@ class SSLMetaArch(nn.Module):
         self.do_dino = cfg.dino.loss_weight > 0
         self.do_koleo = cfg.dino.koleo_loss_weight > 0
         self.do_ibot = cfg.ibot.loss_weight > 0
+        self.do_depth_loss = cfg.depth.loss_weight > 0
 
         self.do_smooth_rank_loss = cfg.dino.smooth_rank_loss_weight > 0
         self.ibot_separate_head = cfg.ibot.separate_head
+
+        logger.info("OPTIONS -- DEPTH")
+        if self.do_depth_loss:
+            logger.info(f"OPTIONS -- DEPTH -- loss_weight: {cfg.depth.loss_weight}")
+            logger.info(f"OPTIONS -- DEPTH -- temperature: {cfg.depth.temperature}")
+            self.depth_loss_weight = cfg.depth.loss_weight
+            self.depth_temperature = cfg.depth.temperature
 
         logger.info("OPTIONS -- DINO")
 
@@ -188,12 +294,12 @@ class SSLMetaArch(nn.Module):
         )
         if self.do_ibot:
             self.ibot_loss_weight = cfg.ibot.loss_weight
-            assert (
-                max(cfg.ibot.mask_ratio_min_max) > 0
-            ), "please provide a positive mask ratio tuple for ibot"
-            assert (
-                cfg.ibot.mask_sample_probability > 0
-            ), "please provide a positive mask probability for ibot"
+            assert max(cfg.ibot.mask_ratio_min_max) > 0, (
+                "please provide a positive mask ratio tuple for ibot"
+            )
+            assert cfg.ibot.mask_sample_probability > 0, (
+                "please provide a positive mask probability for ibot"
+            )
             self.ibot_out_dim = (
                 cfg.ibot.head_n_prototypes
                 if self.ibot_separate_head
@@ -259,6 +365,9 @@ class SSLMetaArch(nn.Module):
         n_masked_patches = mask_indices_list.shape[0]
         upperbound = images["upperbound"]
         masks_weight = images["masks_weight"].cuda(non_blocking=True)
+
+        raw_images = images["collated_raw_image"].cuda(non_blocking=True)
+        depths = images["collated_depth"].cuda(non_blocking=True)
 
         n_local_crops_loss_terms = max(n_local_crops * n_global_crops, 1)
         n_global_crops_loss_terms = (n_global_crops - 1) * n_global_crops
@@ -506,6 +615,20 @@ class SSLMetaArch(nn.Module):
                 )
                 loss_accumulator += smooth_rank_l
                 loss_dict["smooth_rank_loss"] = smooth_rank_l / loss_scales
+
+            if self.do_depth_loss:
+                raw_image_patch_tokens = self.student.backbone(
+                    raw_images, is_training=True
+                )["x_norm_patchtokens"]
+                depth_l = depth_loss(
+                    raw_image_patch_tokens, depths, self.depth_temperature
+                )
+                loss_accumulator += depth_l * self.depth_loss_weight
+                loss_dict["depth_loss"] = depth_l
+                # print(raw_image_patch_tokens.shape, depths.shape)
+                # print(self.depth_loss_weight)
+                # print(self.depth_temperature)
+                # sys.exit()
 
         if do_ibot:
             # compute loss
