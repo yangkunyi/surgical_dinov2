@@ -97,5 +97,9 @@ dino:
 #dino:
 #  head_bottleneck_dim: 256
 depth:
-  loss_weight: 10
+  loss_weight: 1.0
   temperature: 0.05
+
+segmentation:
+  loss_weight: 1.0
+  temperature: 1.0

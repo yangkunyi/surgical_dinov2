@@ -46,7 +46,7 @@ ibot:
   #head_n_prototypes: 131072
 data_transform: "default"
 train:
-  batch_size_per_gpu: 32 #vitg 26+, vitl: 56, vits:152, vitb:120 for 8 node
+  batch_size_per_gpu: 16 #vitg 26+, vitl: 56, vits:152, vitb:120 for 8 node
   num_workers: 12
   OFFICIAL_EPOCH_LENGTH: 5000  # 1250
   dataset_path: HemaStandardDataset:root=/bd_byta6000i0/users/surgical_depth/DinoBloom:shuffle=1
@@ -62,12 +62,12 @@ teacher:
 optim:
   epochs: 10  # 500
   weight_decay_end: 0.2
-  base_lr: 1.5e-03  # learning rate for a batch size of 16
-  warmup_epochs: 0  # 80
+  base_lr: 2.0e-03  # learning rate for a batch size of 16
+  warmup_epochs: 2  # 80
   layerwise_decay: 1.0
 
 evaluation:
-  eval_period_iterations: 200
+  eval_period_iterations: 500
 
 # adapt to model architecture
 # ---------------------------
@@ -82,7 +82,7 @@ crops:
   - 0.32 #0.32 default
   - 1.0
   local_crops_size: 98
-  local_crops_number: 1 #!!! bit hacky, 1 indicates NO LOCAL CROPS !!!
+  local_crops_number: 8 #!!! bit hacky, 1 indicates NO LOCAL CROPS !!!
 dino:
   head_bottleneck_dim: 384 #vits: 256, vitl: 384 
   smooth_rank_loss_weight: 0.0 #doesnt help
@@ -96,3 +96,10 @@ dino:
 #  local_crops_size: 96
 #dino:
 #  head_bottleneck_dim: 256
+depth:
+  loss_weight: 0.0
+  temperature: 0.05
+
+segmentation:
+  loss_weight: 1.0
+  temperature: 1.0

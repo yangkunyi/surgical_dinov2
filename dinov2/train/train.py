@@ -21,7 +21,8 @@ from dinov2.data import (
     MaskingGenerator,
     SamplerType,
     # collate_data_and_cast,
-    collate_data_and_cast_with_depth,
+    # collate_data_and_cast_with_depth,
+    collate_data_and_cast_with_depth_and_mask,
     make_data_loader,
     make_dataset,
 )
@@ -226,7 +227,7 @@ def do_train(cfg, model, resume=False):
         )
 
     collate_fn = partial(
-        collate_data_and_cast_with_depth,
+        collate_data_and_cast_with_depth_and_mask,
         mask_ratio_tuple=cfg.ibot.mask_ratio_min_max,
         mask_probability=cfg.ibot.mask_sample_probability,
         n_tokens=n_tokens,
