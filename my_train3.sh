@@ -1,4 +1,4 @@
-export http_proxy="http://localhost:20171"
-export https_proxy="http://localhost:20171"
+# export http_proxy="http://localhost:20171"
+# export https_proxy="http://localhost:20171"
 
-/bd_byta6000i0/users/surgical_depth/miniforge3/condabin/conda run --live-stream -n dino_train python dinov2/train/train_flat_lr.py --config-file dinov2/configs/train/custom4.yaml --name only_seg
+/bd_byta6000i0/users/surgical_depth/miniforge3/condabin/conda run --live-stream -n DinoBloom python dinov2/train/train_flat_lr.py --config-file dinov2/configs/train/custom4.yaml --name only_seg
