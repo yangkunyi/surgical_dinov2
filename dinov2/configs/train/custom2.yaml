@@ -1,0 +1,101 @@
+# base config: dinov2/configs/train/vitl14.yaml
+compute_precision:
+  grad_scaler: true
+  teacher:
+    backbone:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp16
+        buffer_dtype: fp32
+    dino_head:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp16
+        buffer_dtype: fp32
+    ibot_head:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp16
+        buffer_dtype: fp32
+  student:
+    backbone:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp16
+        buffer_dtype: fp32
+    dino_head:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp32
+        buffer_dtype: fp32
+    ibot_head:
+      sharding_strategy: SHARD_GRAD_OP
+      mixed_precision:
+        param_dtype: fp16
+        reduce_dtype: fp32
+        buffer_dtype: fp32
+
+
+ibot:
+  separate_head: true
+  #head_n_prototypes: 131072
+data_transform: "default"
+train:
+  batch_size_per_gpu: 16 #vitg 26+, vitl: 56, vits:152, vitb:120 for 8 node
+  num_workers: 12
+  OFFICIAL_EPOCH_LENGTH: 5000  # 1250
+  dataset_path: HemaStandardDataset:root=/bd_byta6000i0/users/surgical_depth/DinoBloom:shuffle=1
+  centering: sinkhorn_knopp
+
+  drop_path_rate: 0.4
+  ffn_layer: swiglufused 
+  block_chunks: 0  # for distributed training
+  num_register_tokens: 0  # 0 for no register tokens
+
+teacher:
+  momentum_teacher: 0.994
+optim:
+  epochs: 10  # 500
+  weight_decay_end: 0.2
+  base_lr: 2.0e-03  # learning rate for a batch size of 16
+  warmup_epochs: 2  # 80
+  layerwise_decay: 1.0
+
+evaluation:
+  eval_period_iterations: 500
+
+# adapt to model architecture
+# ---------------------------
+# config for vit
+# "dinov2_vits14","dinov2_vitb14","dinov2_vitl14","dinov2_vitg14"
+
+student:
+  arch: dinov2_vitl14
+  patch_size: 14
+crops:
+  global_crops_scale:
+  - 0.32 #0.32 default
+  - 1.0
+  local_crops_size: 98
+  local_crops_number: 8 #!!! bit hacky, 1 indicates NO LOCAL CROPS !!!
+dino:
+  head_bottleneck_dim: 384 #vits: 256, vitl: 384 
+  smooth_rank_loss_weight: 0.0 #doesnt help
+
+# ---------------------------
+# config for vim_tiny
+#student:
+#  arch: vim_tiny
+#  patch_size: 16
+#crops:
+#  local_crops_size: 96
+#dino:
+#  head_bottleneck_dim: 256
+depth:
+  loss_weight: 10
+  temperature: 0.05
