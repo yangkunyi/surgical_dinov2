@@ -95,12 +95,12 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
 
     # 3. Compute pairwise cosine similarities (batched)
     S_ij_batch = torch.bmm(tokens_norm, tokens_norm.transpose(1, 2)) # Shape: [B, N_tokens, N_tokens]
-
+    S_ij_scaled_batch = (S_ij_batch + 1.0) / 2.0
     # 4. Create batched target similarity matrix
     target_matrix_batch = (seg_labels_flat.unsqueeze(2) == seg_labels_flat.unsqueeze(1)).float() # Shape: [B, N_tokens, N_tokens]
 
     # 5. Compute loss per pair (batched)
-    logits_batch = S_ij_batch / segmentation_temperature
+    logits_batch = S_ij_scaled_batch / segmentation_temperature
     loss_all_pairs_batch = F.binary_cross_entropy_with_logits(
         logits_batch, target_matrix_batch, reduction='none'
     ) # Shape: [B, N_tokens, N_tokens]
