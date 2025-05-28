@@ -60,10 +60,10 @@ train:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 10  # 500
+  epochs: 5  # 500
   weight_decay_end: 0.2
   base_lr: 2.0e-03  # learning rate for a batch size of 16
-  warmup_epochs: 2  # 80
+  warmup_epochs: 1  # 80
   layerwise_decay: 1.0
 
 evaluation:
@@ -97,9 +97,9 @@ dino:
 #dino:
 #  head_bottleneck_dim: 256
 depth:
-  loss_weight: 1.0
+  loss_weight: 0.1
   temperature: 0.05
 
 segmentation:
-  loss_weight: 0.0
+  loss_weight: 0.1
   temperature: 1.0

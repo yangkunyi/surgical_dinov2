@@ -59,8 +59,8 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
         return torch.tensor(0.0, device=device, requires_grad=True)
     if N_tokens <= 1:  # Not enough tokens to form pairs for comparison
         return torch.tensor(0.0, device=device, requires_grad=True)
-    
-    if segmentation_temperature <= 1e-6: # Avoid division by zero or very small numbers
+
+    if segmentation_temperature <= 1e-6:  # Avoid division by zero or very small numbers
         segmentation_temperature = 1e-6
 
     # 1. Downsample segmentation using mode pooling (batched)
@@ -75,39 +75,47 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
     if num_patches_h * num_patches_w != N_tokens:
         raise ValueError(
             f"N_tokens ({N_tokens}) does not match the expected number of patches "
-            f"({num_patches_h*num_patches_w}) derived from H_img={H_img}, W_img={W_img} "
+            f"({num_patches_h * num_patches_w}) derived from H_img={H_img}, W_img={W_img} "
             f"and assumed_patch_size={assumed_patch_size}."
         )
 
-    seg_unfold = F.unfold(segmentation.float(),
-                          kernel_size=assumed_patch_size,
-                          stride=assumed_patch_size)
+    seg_unfold = F.unfold(
+        segmentation.float(), kernel_size=assumed_patch_size, stride=assumed_patch_size
+    )
     if seg_unfold.shape[2] != N_tokens:
-         raise AssertionError(
-             f"Mismatch after unfold: seg_unfold.shape[2]={seg_unfold.shape[2]}, "
-             f"expected N_tokens={N_tokens}"
+        raise AssertionError(
+            f"Mismatch after unfold: seg_unfold.shape[2]={seg_unfold.shape[2]}, "
+            f"expected N_tokens={N_tokens}"
         )
     mode_values, _ = torch.mode(seg_unfold, dim=1)
     seg_labels_flat = mode_values.to(torch.int8)  # Shape: [B, N_tokens]
 
     # 2. Normalize patch tokens (batched)
-    tokens_norm = F.normalize(raw_image_patch_tokens, p=2, dim=2)  # Shape [B, N_tokens, D_tokens]
+    tokens_norm = F.normalize(
+        raw_image_patch_tokens, p=2, dim=2
+    )  # Shape [B, N_tokens, D_tokens]
 
     # 3. Compute pairwise cosine similarities (batched)
-    S_ij_batch = torch.bmm(tokens_norm, tokens_norm.transpose(1, 2)) # Shape: [B, N_tokens, N_tokens]
+    S_ij_batch = torch.bmm(
+        tokens_norm, tokens_norm.transpose(1, 2)
+    )  # Shape: [B, N_tokens, N_tokens]
     S_ij_scaled_batch = (S_ij_batch + 1.0) / 2.0
     # 4. Create batched target similarity matrix
-    target_matrix_batch = (seg_labels_flat.unsqueeze(2) == seg_labels_flat.unsqueeze(1)).float() # Shape: [B, N_tokens, N_tokens]
+    target_matrix_batch = (
+        seg_labels_flat.unsqueeze(2) == seg_labels_flat.unsqueeze(1)
+    ).float()  # Shape: [B, N_tokens, N_tokens]
 
     # 5. Compute loss per pair (batched)
     logits_batch = S_ij_scaled_batch / segmentation_temperature
     loss_all_pairs_batch = F.binary_cross_entropy_with_logits(
-        logits_batch, target_matrix_batch, reduction='none'
-    ) # Shape: [B, N_tokens, N_tokens]
+        logits_batch, target_matrix_batch, reduction="none"
+    )  # Shape: [B, N_tokens, N_tokens]
 
     # 6. Create masks for valid pairs to be included in the loss
     # 6a. Mask for off-diagonal elements (i != j)
-    mask_off_diagonal = ~torch.eye(N_tokens, dtype=torch.bool, device=device) # Shape: [N_tokens, N_tokens]
+    mask_off_diagonal = ~torch.eye(
+        N_tokens, dtype=torch.bool, device=device
+    )  # Shape: [N_tokens, N_tokens]
 
     # 6b. Mask for tokens that are segmented (label != 0)
     token_is_segmented_mask = seg_labels_flat != 0  # Shape: [B, N_tokens]
@@ -116,21 +124,28 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
     # token_is_segmented_mask.unsqueeze(2) -> [B, N_tokens, 1]
     # token_is_segmented_mask.unsqueeze(1) -> [B, 1, N_tokens]
     # Broadcasting results in [B, N_tokens, N_tokens] where M[b,i,j] is true if token i AND token j in sample b are segmented
-    pair_both_segmented_mask = (token_is_segmented_mask.unsqueeze(2) & \
-                                token_is_segmented_mask.unsqueeze(1)) 
+    pair_both_segmented_mask = token_is_segmented_mask.unsqueeze(
+        2
+    ) & token_is_segmented_mask.unsqueeze(1)
 
     # 6d. Final combined mask: pair must be off-diagonal AND both tokens in the pair must be segmented.
     # Unsqueeze mask_off_diagonal to broadcast it from [N_tokens, N_tokens] to [1, N_tokens, N_tokens] for batch operation.
-    final_active_pair_mask = pair_both_segmented_mask & mask_off_diagonal.unsqueeze(0) # Shape: [B, N_tokens, N_tokens]
+    final_active_pair_mask = pair_both_segmented_mask & mask_off_diagonal.unsqueeze(
+        0
+    )  # Shape: [B, N_tokens, N_tokens]
 
     # 7. Calculate "mean of sample means" using the final_active_pair_mask
-    
+
     # Sum of losses for active pairs per sample. Inactive pairs (masked out) will contribute 0 to this sum.
     # Multiplying by final_active_pair_mask.float() effectively zeroes out losses from inactive pairs.
-    active_losses_sum_per_sample = (loss_all_pairs_batch * final_active_pair_mask.float()).sum(dim=[1, 2])
+    active_losses_sum_per_sample = (
+        loss_all_pairs_batch * final_active_pair_mask.float()
+    ).sum(dim=[1, 2])
 
     # Number of active (valid) pairs per sample
-    num_active_pairs_per_sample = final_active_pair_mask.sum(dim=[1, 2]) # Summing boolean tensor gives count of True values
+    num_active_pairs_per_sample = final_active_pair_mask.sum(
+        dim=[1, 2]
+    )  # Summing boolean tensor gives count of True values
 
     # Identify samples that have at least one active pair
     samples_with_valid_pairs_mask = num_active_pairs_per_sample > 0
@@ -139,11 +154,11 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
     sample_mean_losses = torch.zeros(B, device=device, dtype=loss_all_pairs_batch.dtype)
 
     # Calculate mean loss only for samples that have active pairs to avoid division by zero
-    if samples_with_valid_pairs_mask.any(): # Check if there's at least one such sample
+    if samples_with_valid_pairs_mask.any():  # Check if there's at least one such sample
         # Get the sums and counts only for the samples that have valid pairs
         valid_sums = active_losses_sum_per_sample[samples_with_valid_pairs_mask]
         valid_counts = num_active_pairs_per_sample[samples_with_valid_pairs_mask]
-        
+
         sample_mean_losses[samples_with_valid_pairs_mask] = valid_sums / valid_counts
 
     # Final loss: mean of the mean_losses from samples that had valid (active) pairs.
@@ -152,7 +167,7 @@ def segmentation_loss(raw_image_patch_tokens, segmentation, segmentation_tempera
         final_loss = sample_mean_losses[samples_with_valid_pairs_mask].mean()
     else:
         final_loss = torch.tensor(0.0, device=device, requires_grad=True)
-        
+
     return final_loss
 
 
@@ -755,18 +770,24 @@ class SSLMetaArch(nn.Module):
                     raw_images, is_training=True
                 )["x_norm_patchtokens"]
                 if self.do_depth_loss:
-                    depth_l = depth_loss(
-                        raw_image_patch_tokens, depths, self.depth_temperature
+                    depth_l = (
+                        depth_loss(
+                            raw_image_patch_tokens, depths, self.depth_temperature
+                        )
+                        * self.depth_loss_weight
                     )
-                    loss_accumulator += depth_l * self.depth_loss_weight
+                    loss_accumulator += depth_l
                     loss_dict["depth_loss"] = depth_l
                 if self.do_segmentation_loss:
-                    segmentation_l = segmentation_loss(
-                        raw_image_patch_tokens,
-                        segmentations,
-                        self.segmentation_temperature,
+                    segmentation_l = (
+                        segmentation_loss(
+                            raw_image_patch_tokens,
+                            segmentations,
+                            self.segmentation_temperature,
+                        )
+                        * self.segmentation_loss_weight
                     )
-                    loss_accumulator += segmentation_l * self.segmentation_loss_weight
+                    loss_accumulator += segmentation_l
                     loss_dict["segmentation_loss"] = segmentation_l
                 # print(raw_image_patch_tokens.shape, depths.shape)
                 # print(self.depth_loss_weight)

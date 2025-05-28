@@ -58,16 +58,16 @@ train:
   num_register_tokens: 0  # 0 for no register tokens
 
 teacher:
-  momentum_teacher: 0.992
+  momentum_teacher: 0.994
 optim:
-  epochs: 50  # 500
+  epochs: 10  # 500
   weight_decay_end: 0.2
-  base_lr: 5.0e-03  # learning rate for a batch size of 16
-  warmup_epochs: 10  # 80
+  base_lr: 2.0e-03  # learning rate for a batch size of 16
+  warmup_epochs: 2  # 80
   layerwise_decay: 1.0
 
 evaluation:
-  eval_period_iterations: 200
+  eval_period_iterations: 500
 
 # adapt to model architecture
 # ---------------------------
@@ -82,7 +82,7 @@ crops:
   - 0.32 #0.32 default
   - 1.0
   local_crops_size: 98
-  local_crops_number: 1 #!!! bit hacky, 1 indicates NO LOCAL CROPS !!!
+  local_crops_number: 8 #!!! bit hacky, 1 indicates NO LOCAL CROPS !!!
 dino:
   head_bottleneck_dim: 384 #vits: 256, vitl: 384 
   smooth_rank_loss_weight: 0.0 #doesnt help
@@ -97,10 +97,10 @@ dino:
 #dino:
 #  head_bottleneck_dim: 256
 depth:
-  loss_weight: 1.0
+  loss_weight: 10.0
   temperature: 0.05
 
 segmentation:
-  loss_weight: 1.0
+  loss_weight: 10.0
   temperature: 1.0
 
